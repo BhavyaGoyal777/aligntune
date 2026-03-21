@@ -223,6 +223,8 @@ class TrainingConfig:
     load_best_model_at_end: bool = True
     metric_for_best_model: str = "eval_loss"
     greater_is_better: bool = False
+    eval_strategy: str = "no"
+
 
     # TRL specific
     use_trl: bool = False

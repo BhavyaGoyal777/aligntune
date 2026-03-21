@@ -791,6 +791,7 @@ def create_sft_trainer(
             extra_params=kwargs,
             seed=seed,
             data_seed=kwargs.get('data_seed'),
+            eval_strategy=kwargs.get('eval_strategy', 'no')
         ),
         logging=SFTLoggingConfig(
             output_dir=output_dir,
