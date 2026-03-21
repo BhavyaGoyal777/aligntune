@@ -891,6 +891,8 @@ class UnslothSFTTrainer(SFTTrainerBase):
             lr = getattr(self.config.train, 'learning_rate', 2e-4) if hasattr(self.config, 'train') else 2e-4
             save_steps = getattr(self.config.train, 'save_interval', 500) if hasattr(self.config, 'train') else 500
             output_dir = getattr(self.config.logging, 'output_dir', './output') if hasattr(self.config, 'logging') else './output'
+            eval_interval = getattr(self.config.train, 'eval_interval', 500) if hasattr(self.config, 'train') else 500
+            eval_strategy = getattr(self.config.train, 'eval_strategy', 'steps') if hasattr(self.config, 'train') else 'steps'
             # === UNIFIED PRECISION HANDLING ===
             precision = PrecisionHandler.get_precision_from_config(self.config, default="auto")
             precision_args = PrecisionHandler.get_training_args_precision(precision)
@@ -910,7 +912,10 @@ class UnslothSFTTrainer(SFTTrainerBase):
                 lr_scheduler_type="cosine",
                 **precision_args,  
                 dataloader_pin_memory=False,
-                report_to="none" if not hasattr(self.config, 'logging') else "tensorboard"
+                report_to="none" if not hasattr(self.config, 'logging') else "tensorboard",
+                evaluation_strategy=eval_strategy,
+                eval_steps=eval_interval if eval_strategy == 'steps' else None,
+
             )
             
             # Get max_seq_length
