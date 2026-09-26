@@ -379,13 +379,16 @@ def build_model(
                     "training. Set use_peft=True (QLoRA) or train_embeddings=True."
                 )
 
+        new_embedding_token_ids = None
         embedding_init_method = getattr(
             config.model, "embedding_init_method", None
         )
-        if embedding_init_method is not None:
+        train_embeddings = getattr(config.model, "train_embeddings", False)
+        if embedding_init_method is not None or train_embeddings:
             from .tokenization.embedding_adaptation import (
                 adapt_token_embeddings,
             )
+            from .peft.embedding_utils import resolve_new_token_ids
 
             base_tokenizer = AutoTokenizer.from_pretrained(
                 config.model.name_or_path,
@@ -393,21 +396,29 @@ def build_model(
                     config.model, "trust_remote_code", True
                 ),
             )
-            adaptation_report = adapt_token_embeddings(
-                model=model,
-                old_tokenizer=base_tokenizer,
-                new_tokenizer=tokenizer,
-                method=embedding_init_method,
-                pad_to_multiple_of=getattr(
-                    config.model,
-                    "embedding_pad_to_multiple_of",
-                    None,
-                ),
+            new_embedding_token_ids = resolve_new_token_ids(
+                base_tokenizer, tokenizer
             )
-            logger.info(
-                "Tokenizer embedding adaptation complete: %s",
-                adaptation_report,
-            )
+            # Selective training still needs the model resized when callers
+            # omit an explicit init method; use the standard HF-style random
+            # initialization in that case.
+            adaptation_method = embedding_init_method or "random"
+            if embedding_init_method is not None or train_embeddings:
+                adaptation_report = adapt_token_embeddings(
+                    model=model,
+                    old_tokenizer=base_tokenizer,
+                    new_tokenizer=tokenizer,
+                    method=adaptation_method,
+                    pad_to_multiple_of=getattr(
+                        config.model,
+                        "embedding_pad_to_multiple_of",
+                        None,
+                    ),
+                )
+                logger.info(
+                    "Tokenizer embedding adaptation complete: %s",
+                    adaptation_report,
+                )
 
         # Set max_seq_length for trainers that need it (preference-based algorithms)
         # This must be set BEFORE PEFT to ensure it persists through PEFT wrapping
@@ -438,7 +449,10 @@ def build_model(
             logger.info(f"Set model.config.s2_shift_ratio = {s2_shift_ratio}")
 
         # Apply PEFT if requested
-        if apply_peft:
+        # Selective embedding-only training takes precedence over the general
+        # LoRA path. This prevents train_embeddings=True from being routed to
+        # modules_to_save, which would make the entire embedding matrix trainable.
+        if apply_peft and not train_embeddings:
             from .peft.factory import PEFTFactory
             from peft import prepare_model_for_kbit_training
 
@@ -481,13 +495,16 @@ def build_model(
             logger.info(f"Applied PEFT natively via model_loader")
 
         elif getattr(config.model, 'train_embeddings', False):
-            from .peft.embedding_utils import configure_embedding_only_training
+            from .peft.embedding_utils import configure_trainable_tokens
 
-            embedding_module_names = configure_embedding_only_training(model)
+            model = configure_trainable_tokens(
+                model,
+                new_embedding_token_ids or [],
+            )
 
             logger.info(
-                "Configured embedding-only training without PEFT: %s",
-                embedding_module_names,
+                "Configured selective embedding-only training for token IDs: %s",
+                new_embedding_token_ids,
             )
 
         # Print trainable params info
